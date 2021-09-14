@@ -1,0 +1,19 @@
+{
+  "name": "searchtids",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "test"
+  },
+  "keywords": [
+    "bj"
+  ],
+  "author": "bj",
+  "license": "",
+  "dependencies": {
+    "electron": "^13.2.3",
+    "node-html-parser": "^4.1.4"
+  }
+}
