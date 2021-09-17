@@ -94,36 +94,46 @@ function createWindow(){
 		return null;
 	}
 
-const mainfn = function (msg) {
+const getLeavesPaths = function(JsonFilepaths){//synchronous 
+	var filepaths,fpath,leaves=[];
+	var leavesCallBack = function(xPath){
+		if (path.extname(xPath) === '.html'){ 
+			leaves.push(xPath);
+		} 
+	}
+	filepaths = JSON.parse(JsonFilepaths);
+
+	for (let fpath in filepaths){
+		if ("false" === filepaths[fpath]) {
+		   continue;
+		}
+		fs.statSync(fpath).isDirectory() ? walkDir(fpath, leavesCallBack) : leavesCallBack(fpath);	  	
+	}
+	return (leaves); 
+}
+
+const mainfn = function (fpaths, search, onStopCallback) {
   const twstring = "tiddlywiki-version";
   var root,store,nodes,total=0,limit=10,strToFind = "vvvv";//htmlEncode("set=\"CountryFirst\"");;
-  var filepaths = JSON.parse(msg.filepaths);
-  var numProcesses = 0;
-  let launchingTasks;
-  let fpaths = Object.keys(filepaths);
+  var numProcesses = 0;  
+
   if (fpaths.length === 0) {
-	  sendStopMsg();
+	  onStopCallback();
 	  return;
   }
   numProcesses = fpaths.length;
-  for (let fpath in filepaths){
-	   if ("false" === filepaths[fpath]) {
-		   numProcesses--;
-		   continue;
-		}
-       fs.readFile(fpath, 'utf-8', (err, data) => { 
+  for (let fpath=0; fpath < fpaths.length; fpath++){
+       fs.readFile(fpaths[fpath], 'utf-8', (err, data) => { 
          console.log("reading")
          if(err){ 
             console.log("An error ocurred reading the file :" + err.message);
-            if (1===numProcesses) sendStopMsg();
+            if (1===numProcesses) onStopCallback();
             else numProcesses--;
-            c;
          } 
          root = parse(data);
-         console.log (findMetaInHead(root, twstring));
+  
          if (!findMetaInHead(root, twstring)){
-			 console.log (findMetaInHead(root, twstring));
-			 if (1===numProcesses) sendStopMsg();
+			 if (1===numProcesses) onStopCallback();
 			 else numProcesses--;
 			 return;
 		 }
@@ -131,26 +141,33 @@ const mainfn = function (msg) {
          if (store) 	nodes = store.querySelectorAll('div');
 		else nodes = [];
 		for (let i = 0; i< nodes.length; i++){
-		  let tid = findInTid(nodes[i],JSON.parse(msg.search),fpath);
+		  let tid = findInTid(nodes[i],JSON.parse(search),fpaths[fpath]);
 		  //tid?console.log(tid):null;
 		  if (tid) win.webContents.send('dataNew',tid);
 	    }
-	    if (1===numProcesses) sendStopMsg();
+	    if (1===numProcesses) onStopCallback();
 	    else numProcesses--;
-	    console.log("numProcesses "+numProcesses);
       });
   }
 }  
+
+function walkDir(dir, callback) {
+  fs.readdirSync(dir).forEach( f => {
+    let xPath = path.join(dir, f);
+    fs.statSync(xPath).isDirectory()? walkDir(xPath, callback) : callback(xPath);
+  });
+};
+
+
 app.on('ready',createWindow);
 
 function sendStopMsg(){
 	console.log("stopping");
 	win.webContents.send('data',"stop");
 }
-
+// they are set of search locations - dir and file, these are in two seperate lists.
 ipcMain.on("command", (events, args)=>{
-	console.log("got msg " + JSON.stringify(args));
-	mainfn(args);
+	mainfn(getLeavesPaths(args.filepaths), args.search, sendStopMsg);
 })
 
 
