@@ -4,18 +4,19 @@ const path=require('path')
 const { ipcMain } = require('electron')
 const { parse } = require ('node-html-parser')
 let fs = require('fs')
-
+const querystring = require('querystring')
 
 let win, win2;
 
 function createWindow(){
   win=new BrowserWindow({
-    width:900,
-    height:700,
+		show: false,
         webPreferences: {
 		preload: __dirname + "/preload.js"
   }
   })
+  win.maximize();
+  win.show();
   
   win.loadURL("http://127.0.0.1:8088" );
  /* win2=new BrowserWindow({
@@ -73,14 +74,16 @@ function createWindow(){
 		var attrFunc = node.getAttribute ?true:false;
 		var title = node.getAttribute ? node.getAttribute("title") : null;
 		var found = attrFunc && e && title;
+		var searchText = new RegExp(searchTid.text,(searchTid.case === 'any')?'i':'');
+		
 		if (found) found = !(node.getAttribute("plugin-type") == "plugin");// do not search plugins 
 		if (found && searchTid.title) found = (title.search(searchTid.title)!=-1);		
 		if (found && searchTid.tag)   found = (node.getAttribute("tags") && node.getAttribute("tags").search(searchTid.tag)!=-1);
-		if (found && searchTid.text)  found = (e.innerHTML && e.innerHTML.search(searchTid.text)!=-1);	
+		if (found && searchTid.text)  found = (e.innerHTML && e.innerHTML.match(searchText));	
 		if(found) {
 			var attrs = node.attributes,tiddler;
 				tiddler = {
-					text: htmlDecode(e.innerHTML)
+					text: searchTid.text?htmlDecode(e.innerHTML):""
 				};
 				
 			for(var i in attrs) {
@@ -217,14 +220,29 @@ ipcMain.on("command", (events, args)=>{
 			width:900,
 			height:700,
 			webPreferences: {
-		preload: __dirname + "/preloadsaver.js"
-  }
+				preload: __dirname + "/preloadsaver.js"
+			}
 				
-		  })
-		win.loadFile(pathparts[0],{hash:pathparts[1]});
+		})
+		win.loadFile(pathparts[0],{hash: querystring.escape(pathparts[1])});
 		win.webContents.on("new-window", function(event, url) {
 		  event.preventDefault();
-		});
+		});		
+		win.webContents.on('will-prevent-unload', (event) => {
+		  const choice = dialog.showMessageBoxSync(win, {
+			type: 'question',
+			buttons: ['Leave', 'Stay'],
+			title: 'Do you want to leave this tiddlywiki?',
+			message: 'Changes you made may not be saved.',
+			defaultId: 0,
+			cancelId: 1
+		  })
+		  const leave = (choice === 0)
+		  if (leave) {
+			event.preventDefault()
+		  }
+		})		
+
 	}
 })
 
