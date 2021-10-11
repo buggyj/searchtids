@@ -5,7 +5,7 @@ const { ipcMain } = require('electron')
 const { parse } = require ('node-html-parser')
 let fs = require('fs')
 const querystring = require('querystring')
-
+const userDataPath = app.getPath('userData')
 let win, win2;
 
 function createWindow(){
@@ -17,47 +17,42 @@ function createWindow(){
   })
   win.maximize();
   win.show();
+
+if(process.env.NODE_ENV === 'dev') {
+     win.loadURL("http://127.0.0.1:8088" );
+} else {
+	 win.loadFile(__dirname + "/searchfortids.html");
+}
   
-  win.loadURL("http://127.0.0.1:8088" );
- /* win2=new BrowserWindow({
-    width:900,
-    height:700,
-        webPreferences: {
-		preload: __dirname + "/preload.js"
-  }
-  })
-  
-  win2.loadFile("D:\\Users\\jeffr\\Downloads\\tiddlywikilocations\\devtest.html" );*/
+
     //win.openDevTools()
-    win.webContents.on("new-window", function(event, url) {
+  win.webContents.on("new-window", function(event, url) {
   event.preventDefault();
   shell.openExternal(url);
 });
 }
-/*
- * 
- * function createWindow(){
-  win=new BrowserWindow({
-    width:900,
-    height:700,
-    webPreferences: {
-		preload: __dirname + "/preload.js",
-   nodeIntegration: true
-  }
-  })
-  win.loadURL(url.format({
-    pathname:path.join(__dirname,'index.html'),
-    protocol:'file:',
-    slashes:true
-  }))
 
-  win.openDevTools()
-}
-
-
-  * */
-  
-  function htmlEncode(param){
+// Parse a string array from a bracketted list. For example "OneTiddler [[Another Tiddler]] LastOne (--source = tw)"
+var parseStringArray = function(value) {
+	if(typeof value === "string") {
+		var memberRegExp = /(?:^|[^\S\xA0])(?:\[\[(.*?)\]\])(?=[^\S\xA0]|$)|([\S\xA0]+)/mg,
+			results = [],
+			match;
+		do {
+			match = memberRegExp.exec(value);
+			if(match) {
+				var item = match[1] || match[2];
+				if(item !== undefined && results.indexOf(item) === -1) {
+					results.push(item);
+				}
+			}
+		} while(match);
+		return results;
+	} else {
+		return [];
+	}
+};
+ function htmlEncode(param){
 	return(param.replace(/&/mg,"&amp;").replace(/</mg,"&lt;").replace(/>/mg,"&gt;").replace(/\"/mg,"&quot;"));
   }
 
@@ -71,14 +66,21 @@ function createWindow(){
 		while(e &&( !e.tagName ||(e.tagName&& e.tagName.toLowerCase() !== "pre"))) {
 			e = childs[j++];
 		}
+		function unshiftArr (Arr,x) {Arr.unshift(x);return Arr}
 		var attrFunc = node.getAttribute ?true:false;
 		var title = node.getAttribute ? node.getAttribute("title") : null;
 		var found = attrFunc && e && title;
 		var searchText = new RegExp(searchTid.text,(searchTid.case === 'any')?'i':'');
 		
+		var allTagSearch = parseStringArray(searchTid.tag).join('|');
+		var searchTag = new RegExp(allTagSearch,(searchTid.case === 'any')?'i':'');
+		
+		var searchTitle = new RegExp(searchTid.title,(searchTid.case === 'any')?'i':'');
+		var findTag  = (acc, next) => acc || next.match(searchTag);
 		if (found) found = !(node.getAttribute("plugin-type") == "plugin");// do not search plugins 
-		if (found && searchTid.title) found = (title.search(searchTid.title)!=-1);		
-		if (found && searchTid.tag)   found = (node.getAttribute("tags") && node.getAttribute("tags").search(searchTid.tag)!=-1);
+		if (found && searchTid.title) found = (title.match(searchTitle));
+	
+		if (found && searchTid.tag)   found = node.getAttribute("tags") && unshiftArr(parseStringArray(node.getAttribute("tags")),false).reduce(findTag);
 		if (found && searchTid.text)  found = (e.innerHTML && e.innerHTML.match(searchText));	
 		if(found) {
 			var attrs = node.attributes,tiddler;
@@ -91,6 +93,34 @@ function createWindow(){
 			}
 			tiddler.title=filepath + "::" + tiddler.title;
 			return JSON.stringify(tiddler);
+		} else {
+			return "";
+		}
+	}
+
+
+	function newFindInTid(tid,searchTid,filepath) {
+		
+		function unshiftArr (Arr,x) {Arr.unshift(x);return Arr}
+
+		var found = true, tidnew = {};
+		var searchText = new RegExp(searchTid.text,(searchTid.case === 'any')?'i':'');
+		
+		var allTagSearch = parseStringArray(searchTid.tag).join('|');
+		var searchTag = new RegExp(allTagSearch,(searchTid.case === 'any')?'i':'');
+		
+		var searchTitle = new RegExp(searchTid.title,(searchTid.case === 'any')?'i':'');
+		var findTag  = (acc, next) => acc || next.match(searchTag);
+		if (found) found = !(tid["plugin-type"] === "plugin");// do not search plugins 
+		if (found && searchTid.title) found = (tid.title.match(searchTitle));
+	
+		if (found && searchTid.tag)   found =  unshiftArr(parseStringArray(tid.tags),false).reduce(findTag);
+		if (found && searchTid.text)  found = (tid.text && tid.text.match(searchText));	
+		if(found) {
+			tidnew.title=filepath + "::" + tid.title;
+			if (searchTid.text) tidnew.text = tid.text;
+			if (searchTid.tag) tidnew.tags = tid.tags;
+			return JSON.stringify(tidnew);
 		} else {
 			return "";
 		}
@@ -129,7 +159,7 @@ const getLeavesPaths = function(JsonFilepaths){//synchronous
 		return (leaves); 
 	}
 	for (let fpath in filepaths){
-		if ("false" === filepaths[fpath]) {
+		if ("disabled" === filepaths[fpath]) {
 		   continue;
 		}
 		try {
@@ -167,6 +197,15 @@ const mainfn = function (fpaths, search, onStopCallback) {
 			 else numProcesses--;
 			 return;
 		 }
+		 if (findMetaInHead(root, twstring)==="5.2.0"){
+			 store = root.querySelector('.tiddlywiki-tiddler-store').innerHTML;
+			 if (store) nodes = JSON.parse(store);
+			 console.log(nodes.length)
+			 for (let i = 0; i< nodes.length; i++){
+				let tid = newFindInTid(nodes[i],search,fpaths[fpath]);
+				if (tid) win.webContents.send('dataNew',tid);
+			}
+		}
          store = root.querySelector('#storeArea');
          if (store) 	nodes = store.querySelectorAll('div');
 		else nodes = [];
@@ -202,6 +241,8 @@ function sendStopMsg(){
 }
 // they are set of search locations - dir and file, these are in two seperate lists.
 ipcMain.on("command", (events, args)=>{
+	
+	console.log("got action: " + args.action);
 	if (args.action === 'start') {
 		let search;
 		try {
@@ -210,6 +251,16 @@ ipcMain.on("command", (events, args)=>{
 		} catch(e){
 			 sendStopMsg();
 		}	
+	}
+	else if (args.action === 'readUserFile') {
+		var data;
+		try {
+			data = fs.readFileSync(path.join(userDataPath,args.filePath),'utf-8');
+		}catch (e){
+			console.log(e);
+			data = "{}"
+		}
+		events.sender.send("UserConfig",data);
 	}
 	else {
 		let win, myurl, pathparts = args.filepaths.split('/#');console.log (pathparts[0]);
@@ -246,18 +297,19 @@ ipcMain.on("command", (events, args)=>{
 	}
 })
 
-
+var debugcount = 0;
 
 ipcMain.on("savefile", (events, args)=>{
-	console.log("saving to " + args.filePath);
-	fs.writeFile(args.filePath,args.txt,"utf8",(error)=> {
+	debugcount++;
+	fs.writeFile(path.join(userDataPath,args.filePath),args.txt,"utf-8",(error)=> {
 		if (error){
-			events.sender.send("savereturn",{status:"failed",local:true});
+			console.log ("sav error with count = "+debugcount);
+			events.sender.send("savereturn",{status:"failed",local:true,path:args.filePath});
 			}
 		else {
-			events.sender.send("savereturn",{status:"saved",local:true});
+			console.log ("sav save with count = "+debugcount);
+			events.sender.send("savereturn",{status:"saved",local:true,path:args.filePath});
 		}
-		
 	});
-	 
 })
+
